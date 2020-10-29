@@ -7,19 +7,171 @@ output:
 
 
 ## Loading and preprocessing the data
+```{r,echo=TRUE}
+#Downloading the File:
+dataurl <- "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2Factivity.zip"
+if (!file.exists("activity.zip")) {
+	download.file(dataurl, destfile = "activity.zip", method = "curl")
+}
 
+# Unzip data:
+datafile <- "activity.csv"
+if (!file.exists(datafile)) {
+	unzip(zipfile = "activity.zip")
+}
+
+# Load data:
+data <- read.csv(datafile, header = TRUE)
+# To prevent scientific notation:
+options(scipen = 100)
+
+#The data will look like this:
+dim(data)
+str(data)
+head(data,5)
+summary(data)
+```
+```{r,warning=FALSE,message=FALSE}
+#For processing the data, here I will use dplyr package:
+library(dplyr)
+#If it is not install use install.packages('dplyr')
+```
 
 
 ## What is mean total number of steps taken per day?
+```{r,message=FALSE}
+#processing data for this question
+steps_per_day <- select(data,steps,date,interval) %>% group_by(date) %>% summarise(total_steps=sum(steps,na.rm = TRUE))
+mean_total_steps <- mean(steps_per_day$total_steps)
+median_total_steps <- median(steps_per_day$total_steps)
 
+#plot
+hist(steps_per_day$total_steps, 
+     main = "Histogram of total steps per day", 
+     xlab = "Total steps per day", 
+     ylab = "Frequency [number of days]", 
+     breaks = 25,
+     col = "lightgreen"
+)
+
+#Here, black line shows mean of total number of steps taken per day
+abline(v = mean_total_steps, lwd = 1, lty = 2)
+#Here, red line shows median of total number of steps taken per day
+abline(v = median_total_steps, lwd = 1, lty = 2, col = "red")  
+
+```
+
+#### The mean number of steps taken each day is `r round(mean_total_steps, 0)`, the median number is `r round(median_total_steps, 0)`.  
 
 
 ## What is the average daily activity pattern?
+```{r,message=FALSE}
+#processing data for this question
+steps_by_interval <- select(data, steps, date, interval) %>% 
+	group_by(interval) %>% 
+	summarize(average_steps = mean(steps, na.rm = TRUE))
 
+plot(steps_by_interval$average_steps,
+     type='l',
+     main = "Average Step by Interval", 
+     ylab = "Average Step", 
+     xlab = "Interval", 
+     col = "blue"
+)
+max_average_steps <- max(steps_by_interval$average_steps)
+max_average_steps_interval <- steps_by_interval[
+	steps_by_interval$average_steps == max_average_steps,
+]$interval
+abline(v = max_average_steps_interval, lwd = 1, lty = 2, col = "red")
+abline(h = max_average_steps, lwd = 1, lty = 2, col = "red")  
+```
+  
+`r max_average_steps_interval` is the 5-minute interval that, on average, contains the maximum number of `r round(max_average_steps)` steps. 
 
-
+  
 ## Imputing missing values
+The total number of missing values in the dataset is `r sum(is.na(data))`
+```{r,message=FALSE}
+replaced_data <- data %>% mutate(replace_steps = ifelse(is.na(steps),steps_by_interval[2],steps))
 
+head(replaced_data,1)
+
+# Could not figure out how to take 1 value for a particular row attaching whole vector
+
+#Thought of replacing na values with mean
+steps_mm <- select(data,steps,date,interval) %>% group_by(date) %>% summarise(mean_steps=mean(steps,na.rm = TRUE))
+steps_mm$mean_steps[is.nan(steps_mm$mean_steps)] <- 0
+
+updated_data <- data %>% mutate(update_steps = ifelse(is.na(steps),steps_mm[2],steps))
+
+head(updated_data,1)
+#Getting same as above output
+
+#trying this
+updated_activity <- data
+for(r in 1:nrow(updated_activity)) {
+	if (is.na(updated_activity$steps[r])) {
+		i <- updated_activity$interval[r];
+		avg <- steps_by_interval[steps_by_interval$interval==i,]$average_steps
+		
+		updated_activity$steps[r] <- avg
+	}
+}
+
+head(updated_activity[which(
+	updated_activity$date %in% c("2012-10-01", "2012-10-08", "2012-11-01", "2012-11-04", "2012-11-09", "2012-11-10") & 
+	updated_activity$interval %in% c(600,1000,2000)),], n = 30)
+
+updated_steps_by_date <- select(updated_activity, steps, date, interval) %>% 
+    group_by(date) %>% 
+    summarize(total_steps = sum(steps, na.rm = TRUE))
+
+hist(updated_steps_by_date$total_steps, 
+	main = "Histogram of total steps per day,\nreplacing NAs with average steps for given interval", 
+	xlab = "Total steps per day", 
+	ylab = "Frequency [number of days]", 
+	breaks = 20,
+	border = "cadetblue4",
+	col = "cadetblue3"
+)
+updated_mean_total_steps <- mean(updated_steps_by_date$total_steps)
+updated_median_total_steps <- median(updated_steps_by_date$total_steps)
+abline(v = updated_mean_total_steps, lwd = 1, lty = 2, col = "red")
+abline(v = updated_median_total_steps, lwd = 1, lty = 2, col = "red")
+
+```
+  
+The mean number of steps taken each day is now `r round(updated_mean_total_steps, 0)` 
+(compared to `r round(mean_total_steps, 0)` with NAs), and the median number 
+is `r round(updated_median_total_steps, 0)` now (compared to `r round(median_total_steps, 0)` with NAs). 
 
 
 ## Are there differences in activity patterns between weekdays and weekends?
+```{r, echo=TRUE, fig.width=10}
+activity_with_weekday <- mutate(updated_activity, 
+	weekday = weekdays(as.Date(updated_activity$date)),
+	weekday_is = as.factor(ifelse(weekday=="Saturday" | weekday=="Sunday", "weekend", "weekday"))
+)
+# Sample of the extended data
+head(select(activity_with_weekday, date, weekday, weekday_is) %>% distinct(date), n = 20)
+library(lattice) 
+# Get average number of steps per weekday/weekend and interval
+summary <- select(activity_with_weekday, steps, date, interval, weekday_is) %>% 
+    group_by(weekday_is, interval) %>% 
+    summarize(average_steps = mean(steps, na.rm = TRUE))
+xyplot(average_steps ~ interval | weekday_is, data = summary, layout = c(1,2), type = "l",
+	main = "Average steps by 5-minute interval",
+	xlab = "Interval",
+	ylab = "Average number of steps",
+	col = "cadetblue4"
+)
+```
+
+Yes, there is a difference in activity patterns between weekdays and weekends.
+It looks like the activities start a little later and more gradually on the weekends. The step volume is also a bit higher throughout the day.
+On weekdays the step volume appears to be higher and increase quicker (more steeply) in the mornings, but remains a little lower throughout the day.
+
+```{r, echo=TRUE}
+# Clean up
+rm(list=ls(all=TRUE)) 
+```
